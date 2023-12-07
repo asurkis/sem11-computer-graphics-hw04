@@ -52,6 +52,7 @@ std::optional<Hit> ScanSphereO(Vec3 dir, Vec3 oa, Real radius) {
     Vec3 norm = glm::normalize(ax);
 
     if (oxLen < ZERO) return {};
+    if (glm::dot(norm, dir) > ZERO) return {};
 
     return {{ox, norm, oxLen}};
 }
@@ -64,7 +65,7 @@ std::optional<Hit> ScanSphere(Vec3 origin, Vec3 dir, Vec3 center, Real radius) {
 
 ////////////////////////////////////////////////////////////////
 
-const Vec3 CAM_ORIGIN = {4., 4., 4.};
+const Vec3 CAM_ORIGIN = {0., 0., 5.};
 const Vec3 CAM_LOOK_AT = {0., 0., 0.};
 const Vec3 WORLD_UP = {0., 1., 0.};
 
@@ -74,10 +75,11 @@ const Vec3 CAM_UP = glm::normalize(glm::cross(CAM_RIGHT, CAM_FORWARD));
 
 std::optional<Hit> ScanScene(Vec3 origin, Vec3 dir) {
     std::optional<Hit> bestHit;
-    for (int i = -1; i <= 1; ++i) {
-        for (int j = -1; j <= 1; ++j) {
-            for (int k = -1; k <= 1; ++k) {
-                std::optional<Hit> hit = ScanSphere(origin, dir, TWO * Vec3(i, j, k), 1);
+    for (int i = -2; i < 2; ++i) {
+        for (int j = -2; j < 2; ++j) {
+            for (int k = -2; k < 2; ++k) {
+                Vec3 pos = Real(3.) * (Vec3(i, j, k) + HALF);
+                std::optional<Hit> hit = ScanSphere(origin, dir, pos, ONE);
                 if (!hit) continue;
                 if (!bestHit || bestHit->distance > hit->distance) {
                     bestHit = hit;
@@ -98,10 +100,25 @@ Vec3 Sky(Vec3 dir) {
     return DebugNormal(dir);
 }
 
+constexpr int MAX_REFLECTIONS = 4;
+
 Vec3 CastRay(Vec3 origin, Vec3 dir) {
-    std::optional<Hit> hit = ScanScene(origin, dir);
-    if (!hit) return Sky(dir);
-    return DebugNormal(hit->normal);
+    Vec3 acc = {};
+    Real weight = ONE;
+    for (int i = 0; i < MAX_REFLECTIONS; ++i) {
+        std::optional<Hit> hit = ScanScene(origin, dir);
+        if (!hit) break;
+
+        Real reflectivity = .75;
+        acc += weight * (1. - reflectivity) * .25;
+        weight *= reflectivity;
+
+        origin = hit->point;
+        dir = glm::reflect(dir, hit->normal);
+        // return DebugNormal(hit->normal);
+    }
+    acc += weight * Sky(dir);
+    return acc;
 }
 
 ////////////////////////////////////////////////////////////////
@@ -113,7 +130,7 @@ Vec3 picture[PIC_HEIGHT][PIC_WIDTH];
 
 void GeneratePicture() {
     constexpr Real ASPECT_RATIO = Real(PIC_WIDTH) / Real(PIC_HEIGHT);
-    constexpr int SAMPLES = 1;
+    constexpr int SAMPLES = 64;
     constexpr Real SAMPLE_WEIGHT = ONE / SAMPLES;
 
 #pragma omp parallel for
@@ -125,9 +142,9 @@ void GeneratePicture() {
             Vec3 result = {};
             for (int i = 0; i < SAMPLES; ++i) {
                 Vec2 xy = Vec2(col, row);
-                // xy.x += uniform(rng);
-                // xy.y += uniform(rng);
-                xy += HALF;
+                xy.x += uniform(rng);
+                xy.y += uniform(rng);
+                // xy += HALF;
                 xy /= Vec2(PIC_WIDTH, PIC_HEIGHT);
                 xy = xy * TWO - ONE;
                 xy *= Vec2(ASPECT_RATIO, -ONE);
