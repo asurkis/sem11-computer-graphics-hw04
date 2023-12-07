@@ -179,7 +179,7 @@ bool ScanPlaneO(
     out.TexCoord.x = glm::dot(ax, planeX);
     out.TexCoord.y = glm::dot(ax, planeZ);
 
-    if (denormalized) { out.TexCoord /= Vec2(glm::length(planeX), glm::length(planeZ)); }
+    if (denormalized) { out.TexCoord /= Vec2(glm::dot(planeX, planeX), glm::dot(planeZ, planeZ)); }
 
     return true;
 }
@@ -200,8 +200,8 @@ bool ScanPlane(HitPoint &out,
 bool ScanTriangle(HitPoint &out, Vec3 origin, Vec3 dir, Vec3 a, Vec3 b, Vec3 c) {
     Vec3 ab = b - a;
     Vec3 ac = c - a;
-    Vec3 norm = glm::normalize(glm::cross(ac, ab));
-    bool found = ScanPlane(out, origin, dir, a, ab, norm, ac);
+    Vec3 norm = glm::normalize(glm::cross(ab, ac));
+    bool found = ScanPlane(out, origin, dir, a, ab, norm, ac, true);
     if (!found) return false;
     if (out.TexCoord.x < ZERO) return false;
     if (out.TexCoord.y < ZERO) return false;
@@ -237,9 +237,9 @@ void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
     }
 
     HitFull hit;
-    hit.Found = ScanTriangle(hit.Point, origin, dir, {0., 0., 0.}, {0., 1., 0.}, {1., 0., 0.});
+    hit.Found = ScanTriangle(hit.Point, origin, dir, {0., 0., 0.}, {1.5, 0., 0.}, {0., 1.5, 0.});
     hit.Material.BaseColor = {};
-    hit.Material.Emission = Vec3(hit.Point.TexCoord, 0.);
+    hit.Material.Emission = hit.Point.Position;
     hit.Material.ProbReflect = 0.;
     HitSelect(bestHit, hit);
 
