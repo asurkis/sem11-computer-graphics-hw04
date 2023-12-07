@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <fstream>
 #include <optional>
+#include <random>
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -73,21 +74,35 @@ Vec3 CastRay(Vec3 origin, Vec3 dir) {
 
 constexpr size_t PIC_WIDTH = 640;
 constexpr size_t PIC_HEIGHT = 480;
-constexpr Real ASPECT_RATIO = Real(PIC_WIDTH) / Real(PIC_HEIGHT);
 
 Vec3 picture[PIC_HEIGHT][PIC_WIDTH];
 
 void GeneratePicture() {
-    for (size_t row = 0; row < PIC_HEIGHT; ++row) {
-        for (size_t col = 0; col < PIC_WIDTH; ++col) {
-            Vec2 xy = Vec2(col, row) + HALF;
-            xy /= Vec2(PIC_WIDTH, PIC_HEIGHT);
-            xy = xy * TWO - ONE;
-            xy *= Vec2(ASPECT_RATIO, -ONE);
+    constexpr Real ASPECT_RATIO = Real(PIC_WIDTH) / Real(PIC_HEIGHT);
+    constexpr int SAMPLES = 1;
+    constexpr Real SAMPLE_WEIGHT = ONE / SAMPLES;
 
-            Vec3 origin = {ZERO, ZERO, Real(3.)};
-            Vec3 viewDir = glm::normalize(Vec3(xy, -ONE));
-            picture[row][col] = CastRay(origin, viewDir);
+#pragma omp parallel for
+    for (size_t row = 0; row < PIC_HEIGHT; ++row) {
+        std::default_random_engine rng;
+        std::uniform_real_distribution<Real> uniform;
+
+        for (size_t col = 0; col < PIC_WIDTH; ++col) {
+            Vec3 result = {};
+            for (int i = 0; i < SAMPLES; ++i) {
+                Vec2 xy = Vec2(col, row);
+                // xy.x += uniform(rng);
+                // xy.y += uniform(rng);
+                xy += HALF;
+                xy /= Vec2(PIC_WIDTH, PIC_HEIGHT);
+                xy = xy * TWO - ONE;
+                xy *= Vec2(ASPECT_RATIO, -ONE);
+
+                Vec3 origin = {ZERO, ZERO, Real(3.)};
+                Vec3 viewDir = glm::normalize(Vec3(xy, -ONE));
+                result += SAMPLE_WEIGHT * CastRay(origin, viewDir);
+            }
+            picture[row][col] = result;
         }
     }
 }
