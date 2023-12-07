@@ -171,7 +171,10 @@ bool ScanPlaneO(
     Real dirDotNorm = glm::dot(dir, planeY);
     if (dirDotNorm >= ZERO) return false;
 
-    out.Distance = -ONE / dirDotNorm;
+    Real distToPlane = glm::dot(oa, planeY);
+    if (distToPlane >= ZERO) return false;
+
+    out.Distance = distToPlane / dirDotNorm;
     out.Position = dir * out.Distance;
     out.Normal = planeY;
 
@@ -239,7 +242,7 @@ void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
     HitFull hit;
     hit.Found = ScanTriangle(hit.Point, origin, dir, {0., 0., 0.}, {1.5, 0., 0.}, {0., 1.5, 0.});
     hit.Material.BaseColor = {};
-    hit.Material.Emission = hit.Point.Position;
+    hit.Material.Emission = Vec3(hit.Point.TexCoord, 0.);
     hit.Material.ProbReflect = 0.;
     HitSelect(bestHit, hit);
 
