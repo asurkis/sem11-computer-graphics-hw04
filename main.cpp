@@ -8,6 +8,8 @@
 
 ////////////////////////////////////////////////////////////////
 
+using RNG = std::default_random_engine;
+
 using Real = float;
 using Vec2 = glm::vec<2, Real>;
 using Vec3 = glm::vec<3, Real>;
@@ -27,12 +29,16 @@ constexpr size_t PIC_WIDTH = 1280;
 constexpr size_t PIC_HEIGHT = 720;
 constexpr int PIXEL_MAX = 255;
 
-constexpr int MAX_REFLECTIONS = 4;
-constexpr int AA_SAMPLES = 4;
+constexpr int MAX_BOUNCES = 64;
+constexpr int AA_SAMPLES = 64;
 
 const Vec3 CAM_ORIGIN = {0., 1., 5.};
 const Vec3 CAM_LOOK_AT = {0., 2., 0.};
 const Vec3 WORLD_UP = {0., 1., 0.};
+
+const Vec3 SUN_DIR = glm::normalize(Vec3(.5, .1, -1.));
+const Vec3 SUNLIGHT_COLOR = {2.5, 2., 1.5};
+constexpr Real FUZZINESS = .05;
 
 constexpr Real GAMMA = 2.;
 
@@ -53,7 +59,8 @@ struct HitPoint {
 
 struct HitMaterial {
     Vec3 BaseColor;
-    Real Reflectivity;
+    Vec3 Emission;
+    Real ProbReflect;
 };
 
 struct HitFull {
@@ -63,6 +70,15 @@ struct HitFull {
 };
 
 ////////////////////////////////////////////////////////////////
+
+Vec3 RandomNormal3(RNG &rng) noexcept {
+    std::normal_distribution<Real> distrib;
+    Vec3 vec;
+    vec.x = distrib(rng);
+    vec.y = distrib(rng);
+    vec.z = distrib(rng);
+    return glm::normalize(vec);
+}
 
 Vec3 DebugNormal(Vec3 norm) noexcept { return norm * HALF + HALF; }
 
@@ -136,7 +152,7 @@ bool ScanPlane(HitPoint &out, Vec3 origin, Vec3 dir, Vec3 planeOrigin,
 
 ////////////////////////////////////////////////////////////////
 
-void HitJoin(HitFull &lhsHit, const HitFull &rhsHit) noexcept {
+void HitSelect(HitFull &lhsHit, const HitFull &rhsHit) noexcept {
     if (!rhsHit.Found) return;
     if (!lhsHit.Found || rhsHit.Point.Distance < lhsHit.Point.Distance) {
         lhsHit = rhsHit;
@@ -144,6 +160,7 @@ void HitJoin(HitFull &lhsHit, const HitFull &rhsHit) noexcept {
 }
 
 void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
+    /*
     for (int i = -2; i < 2; ++i) {
         for (int j = 0; j < 4; ++j) {
             for (int k = -2; k < 2; ++k) {
@@ -152,54 +169,103 @@ void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
                 hit.Found = ScanSphere(hit.Point, origin, dir, pos, ONE);
                 hit.Material.BaseColor = Vec3(.25);
                 hit.Material.Reflectivity = .75;
-                HitJoin(bestHit, hit);
+                HitSelect(bestHit, hit);
             }
         }
     }
+    */
 
-    HitFull floorHit;
-    floorHit.Found = ScanPlane(floorHit.Point, origin, dir, {}, {1., 0., 0.},
+    HitFull hitSphere;
+    hitSphere.Found
+        = ScanSphere(hitSphere.Point, origin, dir, {0., 1., 0.}, 1.);
+    hitSphere.Material.BaseColor = Vec3(.25);
+    hitSphere.Material.Emission = {};
+    hitSphere.Material.ProbReflect = 0.;
+    HitSelect(bestHit, hitSphere);
+
+    HitFull hitFloor;
+    hitFloor.Found = ScanPlane(hitFloor.Point, origin, dir, {}, {1., 0., 0.},
                                {0., 1., 0.}, {0., 0., 1.});
-    if (floorHit.Found) {
-        Vec2i ij = glm::floor(floorHit.Point.TexCoord);
+    if (hitFloor.Found) {
+        Vec2i ij = glm::floor(hitFloor.Point.TexCoord);
         if ((ij.x + ij.y) % 2 == 0) {
-            floorHit.Material.BaseColor = Vec3(.8);
+            hitFloor.Material.BaseColor = Vec3(.8);
         } else {
-            floorHit.Material.BaseColor = Vec3(.2);
+            hitFloor.Material.BaseColor = Vec3(.2);
         }
-        floorHit.Material.Reflectivity = .25;
+        hitFloor.Material.Emission = {};
+        hitFloor.Material.ProbReflect = 0.;
     }
-    HitJoin(bestHit, floorHit);
+    HitSelect(bestHit, hitFloor);
 }
 
 ////////////////////////////////////////////////////////////////
 
 Vec3 Sky(Vec3 dir) noexcept {
-    // Для отладки покажем нормаль
-    // Real max0 = std::max(ZERO, dir.y);
-    // Real gray = max0 * max0;
-    // return {gray, gray, gray};
-    return DebugNormal(dir);
+    constexpr Vec3 SKY_COLORS[] = {
+        Vec3(.05, .05, .25), Vec3(.75, .25, .5), Vec3(.9, .9, .6),
+        Vec3(1., 1., .99),   Vec3(5., 5., 3.),
+    };
+    constexpr Real SKY_BORDER[] = {
+        -1., 0., .9, .99,
+        2., // > 1 на случай, если косинус строго равен 1
+    };
+    constexpr size_t COLOR_COUNT = sizeof(SKY_COLORS) / sizeof(SKY_COLORS[0]);
+    static_assert(sizeof(SKY_BORDER) / sizeof(SKY_BORDER[0]) == COLOR_COUNT);
+
+    Real cosTh = glm::dot(SUN_DIR, dir);
+    for (size_t i = 0; i < COLOR_COUNT; ++i) {
+        Real thresh1 = SKY_BORDER[i + 1];
+        if (cosTh <= thresh1) {
+            Vec3 col0 = SKY_COLORS[i];
+            Vec3 col1 = SKY_COLORS[i + 1];
+            Real thresh0 = SKY_BORDER[i];
+            Real delta = thresh1 - thresh0;
+            return glm::mix(col0, col1, (cosTh - thresh0) / delta);
+        }
+    }
+    return SKY_COLORS[COLOR_COUNT - 1];
+
+    // Real progress = HALF * (dir.y + ONE);
+    // return glm::mix(Vec3(1., 1., 1.), Vec3(.5, .7, 1.), progress);
 }
 
-Vec3 CastRay(Vec3 origin, Vec3 dir) noexcept {
-    Vec3 acc = {};
-    Real weight = ONE;
-    for (int i = 0; i < MAX_REFLECTIONS; ++i) {
+Vec3 CastRay(RNG &rng, Vec3 origin, Vec3 dir) noexcept {
+    std::uniform_real_distribution<Real> uniform;
+
+    Vec3 accPixelColor = {};
+    Vec3 accMaterialBaseColor(ONE);
+    for (int i = 0; i < MAX_BOUNCES; ++i) {
         HitFull hit = {};
         ScanScene(hit, origin, dir);
         if (!hit.Found) break;
 
         Vec3 base = hit.Material.BaseColor;
-        Real reflectivity = hit.Material.Reflectivity;
-        acc += weight * (ONE - reflectivity) * base;
-        weight *= reflectivity;
+        accPixelColor += accMaterialBaseColor * hit.Material.Emission;
+        accMaterialBaseColor *= hit.Material.BaseColor;
 
         origin = hit.Point.Position;
-        dir = glm::reflect(dir, hit.Point.Normal);
+        if (uniform(rng) < hit.Material.ProbReflect) {
+            dir = glm::reflect(dir, hit.Point.Normal);
+        } else {
+            // Проверим, освещены ли мы солнцем
+            HitFull hitSun = {};
+            Vec3 fuzzySunDir
+                = glm::normalize(SUN_DIR + FUZZINESS * RandomNormal3(rng));
+            ScanScene(hitSun, origin, fuzzySunDir);
+            if (!hitSun.Found) {
+                // Ничто не загораживает солнце
+                Real coef = glm::dot(hit.Point.Normal, fuzzySunDir);
+                coef = glm::max(coef, ZERO);
+                accPixelColor += coef * accMaterialBaseColor * SUNLIGHT_COLOR;
+            }
+
+            dir = hit.Point.Normal + RandomNormal3(rng);
+            dir = glm::normalize(dir);
+        }
     }
-    acc += weight * Sky(dir);
-    return acc;
+    accPixelColor += accMaterialBaseColor * Sky(dir);
+    return accPixelColor;
 }
 
 ////////////////////////////////////////////////////////////////
@@ -210,14 +276,19 @@ void GeneratePicture() noexcept {
     constexpr Real ASPECT_RATIO = Real(PIC_WIDTH) / Real(PIC_HEIGHT);
     constexpr Real SAMPLE_WEIGHT = ONE / AA_SAMPLES;
 
+    // Если делать случайные числа thread local,
+    // то будет слишком заметен паттерн шума,
+    // т.к. он будет повторяться на соседних строках
+    // с небольшим сдвигом.
+    RNG rng;
+
 #pragma omp parallel for
     for (size_t row = 0; row < PIC_HEIGHT; ++row) {
-        std::default_random_engine rng;
         std::uniform_real_distribution<Real> uniform;
 
         for (size_t col = 0; col < PIC_WIDTH; ++col) {
             Vec3 result = {};
-            for (int i = 0; i < AA_SAMPLES; ++i) {
+            for (int sample = 0; sample < AA_SAMPLES; ++sample) {
                 Vec2 xy = Vec2(col, row);
                 xy.x += uniform(rng);
                 xy.y += uniform(rng);
@@ -228,7 +299,7 @@ void GeneratePicture() noexcept {
 
                 Vec3 viewDir = xy.x * CAM_RIGHT + xy.y * CAM_UP + CAM_FORWARD;
                 viewDir = glm::normalize(viewDir);
-                result += SAMPLE_WEIGHT * CastRay(CAM_ORIGIN, viewDir);
+                result += SAMPLE_WEIGHT * CastRay(rng, CAM_ORIGIN, viewDir);
             }
             picture[row][col] = result;
         }
