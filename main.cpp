@@ -33,12 +33,12 @@ constexpr Real HALF = Real(.5);
 
 ////////////////////////////////////////////////////////////////
 
-constexpr size_t PIC_WIDTH = 1920;
-constexpr size_t PIC_HEIGHT = 1080;
+constexpr size_t PIC_WIDTH = 640;
+constexpr size_t PIC_HEIGHT = 480;
 constexpr int PIXEL_MAX = 255;
 
-constexpr int MAX_BOUNCES = 32;
-constexpr int AA_SAMPLES = 32;
+constexpr int MAX_BOUNCES = 8;
+constexpr int AA_SAMPLES = 16;
 
 const Vec3 CAM_ORIGIN = {-1., 3., 3.};
 const Vec3 CAM_LOOK_AT = {0., 1., 0.};
@@ -87,12 +87,15 @@ struct Sphere {
 };
 
 constexpr Sphere SPHERES[] = {
-    {{2., 1., 2.}, 1., {Vec3(.25), {}, 0.}},
+    {{1., 1., 1.}, 1., {Vec3(.9), {}, .9}},
+    {{-1., 1., 1.}, 1., {Vec3(.85), {}, .9}},
+    {{1., 1., -1.}, 1., {Vec3(.75), Vec3(0., 0., .2), .9}},
+    {{-1., 1., -1.}, 1., {Vec3(.75), {}, .9}},
 };
 
 ////////////////////////////////////////////////////////////////
 
-constexpr HitMaterial MODEL_MATERIAL = {Vec3(1., .75, .5), Vec3(.01), 0.};
+constexpr HitMaterial MODEL_MATERIAL = {Vec3(1., .75, .5), Vec3(.01), .9};
 
 struct Model {
     std::vector<Vec3> Vertices;
@@ -255,7 +258,7 @@ void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
     }
 
     HitFull hitFloor;
-    hitFloor.Found = ScanPlane(hitFloor.Point, origin, dir, {0., -1., 0.}, {1., 0., 0.}, {0., 1., 0.}, {0., 0., 1.});
+    hitFloor.Found = ScanPlane(hitFloor.Point, origin, dir, {}, {1., 0., 0.}, {0., 1., 0.}, {0., 0., 1.});
     if (hitFloor.Found) {
         Vec2i ij = glm::floor(hitFloor.Point.TexCoord);
         if ((ij.x + ij.y) % 2 == 0) {
@@ -357,6 +360,7 @@ void ReadModel() {
         if (std::string_view(type) == "v") {
             glm::vec3 vertex;
             if (fscanf(f, "%f %f %f", &vertex.x, &vertex.y, &vertex.z) != 3) break;
+            vertex.y += 1.;
             model.Vertices.push_back(vertex);
         } else if (std::string_view(type) == "vt") {
             glm::vec2 textureCoord;
