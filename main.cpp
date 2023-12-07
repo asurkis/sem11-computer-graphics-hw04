@@ -33,14 +33,14 @@ constexpr Real HALF = Real(.5);
 
 ////////////////////////////////////////////////////////////////
 
-constexpr size_t PIC_WIDTH = 640;
-constexpr size_t PIC_HEIGHT = 480;
+constexpr size_t PIC_WIDTH = 1920;
+constexpr size_t PIC_HEIGHT = 1080;
 constexpr int PIXEL_MAX = 255;
 
-constexpr int MAX_BOUNCES = 8;
-constexpr int AA_SAMPLES = 4;
+constexpr int MAX_BOUNCES = 32;
+constexpr int AA_SAMPLES = 32;
 
-const Vec3 CAM_ORIGIN = {0., 1., 5.};
+const Vec3 CAM_ORIGIN = {-2., 3., 3.};
 const Vec3 CAM_LOOK_AT = {0., 1., 0.};
 const Vec3 WORLD_UP = {0., 1., 0.};
 
@@ -92,7 +92,7 @@ constexpr Sphere SPHERES[] = {
 
 ////////////////////////////////////////////////////////////////
 
-constexpr HitMaterial MODEL_MATERIAL = {Vec3(1., .75, .5), {}, 0.};
+constexpr HitMaterial MODEL_MATERIAL = {Vec3(1., .75, .5), Vec3(.01), 0.};
 
 struct Model {
     std::vector<Vec3> Vertices;
