@@ -1,5 +1,6 @@
 BasedOnStyle: LLVM
 IndentWidth: 4
+ColumnLimit: 120
 
 AllowShortBlocksOnASingleLine: true
 AllowShortCaseLabelsOnASingleLine: true
@@ -9,3 +10,5 @@ AllowShortLambdasOnASingleLine: true
 AllowShortLoopsOnASingleLine: true
 
 BreakBeforeBinaryOperators: true
+BinPackArguments: false
+BinPackParameters: false

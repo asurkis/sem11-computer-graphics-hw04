@@ -29,8 +29,8 @@ constexpr size_t PIC_WIDTH = 1280;
 constexpr size_t PIC_HEIGHT = 720;
 constexpr int PIXEL_MAX = 255;
 
-constexpr int MAX_BOUNCES = 64;
-constexpr int AA_SAMPLES = 64;
+constexpr int MAX_BOUNCES = 8;
+constexpr int AA_SAMPLES = 8;
 
 const Vec3 CAM_ORIGIN = {0., 1., 5.};
 const Vec3 CAM_LOOK_AT = {0., 2., 0.};
@@ -38,7 +38,7 @@ const Vec3 WORLD_UP = {0., 1., 0.};
 
 const Vec3 SUN_DIR = glm::normalize(Vec3(.5, .1, -1.));
 const Vec3 SUNLIGHT_COLOR = {2.5, 2., 1.5};
-constexpr Real FUZZINESS = .05;
+constexpr Real FUZZINESS = .005;
 
 constexpr Real GAMMA = 2.;
 
@@ -71,7 +71,27 @@ struct HitFull {
 
 ////////////////////////////////////////////////////////////////
 
+struct Sphere {
+    Vec3 Center;
+    Real Radius;
+    HitMaterial Material;
+};
+
+constexpr Sphere SPHERES[] = {
+    {{0., 1., 0.}, 1., {Vec3(.25), {}, 0.}},
+};
+
+////////////////////////////////////////////////////////////////
+
 Vec3 RandomNormal3(RNG &rng) noexcept {
+    // std::uniform_real_distribution<Real> uniform(-1.);
+    // for (;;) {
+    //     Vec3 vec;
+    //     vec.x = uniform(rng);
+    //     vec.y = uniform(rng);
+    //     vec.z = uniform(rng);
+    //     if (glm::dot(vec, vec) <= ONE) return glm::normalize(vec);
+    // }
     std::normal_distribution<Real> distrib;
     Vec3 vec;
     vec.x = distrib(rng);
@@ -102,12 +122,13 @@ bool ScanSphereO(HitPoint &out, Vec3 dir, Vec3 oa, Real radius) noexcept {
     if (hx2 < ZERO) return false;
 
     Real oxLen = glm::length(oh) - glm::sqrt(hx2);
+    if (oxLen < ZERO) return false;
+
     Vec3 ox = dir * oxLen;
     Vec3 ax = ox - oa;
-    Vec3 norm = glm::normalize(ax);
+    if (glm::dot(ax, dir) >= ZERO) return false;
 
-    if (oxLen < ZERO) return false;
-    if (glm::dot(norm, dir) >= ZERO) return false;
+    Vec3 norm = glm::normalize(ax);
 
     out.Position = ox;
     out.Normal = norm;
@@ -116,15 +137,14 @@ bool ScanSphereO(HitPoint &out, Vec3 dir, Vec3 oa, Real radius) noexcept {
     return true;
 }
 
-bool ScanSphere(HitPoint &out, Vec3 origin, Vec3 dir, Vec3 center,
-                Real radius) noexcept {
+bool ScanSphere(HitPoint &out, Vec3 origin, Vec3 dir, Vec3 center, Real radius) noexcept {
     bool hitFound = ScanSphereO(out, dir, center - origin, radius);
     if (hitFound) out.Position += origin;
     return hitFound;
 }
 
-bool ScanPlaneO(HitPoint &out, Vec3 dir, Vec3 oa, Vec3 planeX, Vec3 planeY,
-                Vec3 planeZ) noexcept {
+bool ScanPlaneO(
+    HitPoint &out, Vec3 dir, Vec3 oa, Vec3 planeX, Vec3 planeY, Vec3 planeZ, bool denormalized = false) noexcept {
     // O --- центр координат
     // A --- точка на плоскости
     // X --- точка пересечения луча с плоскостью
@@ -139,53 +159,53 @@ bool ScanPlaneO(HitPoint &out, Vec3 dir, Vec3 oa, Vec3 planeX, Vec3 planeY,
     out.TexCoord.x = glm::dot(ax, planeX);
     out.TexCoord.y = glm::dot(ax, planeZ);
 
+    if (denormalized) { out.TexCoord /= Vec2(glm::length(planeX), glm::length(planeZ)); }
+
     return true;
 }
 
-bool ScanPlane(HitPoint &out, Vec3 origin, Vec3 dir, Vec3 planeOrigin,
-               Vec3 planeX, Vec3 planeY, Vec3 planeZ) noexcept {
-    bool hitFound
-        = ScanPlaneO(out, dir, planeOrigin - origin, planeX, planeY, planeZ);
+bool ScanPlane(HitPoint &out,
+               Vec3 origin,
+               Vec3 dir,
+               Vec3 planeOrigin,
+               Vec3 planeX,
+               Vec3 planeY,
+               Vec3 planeZ,
+               bool denormalized = false) noexcept {
+    bool hitFound = ScanPlaneO(out, dir, planeOrigin - origin, planeX, planeY, planeZ, denormalized);
     if (hitFound) out.Position += origin;
     return hitFound;
+}
+
+bool ScanTriangle(HitPoint &out, Vec3 origin, Vec3 dir, Vec3 a, Vec3 b, Vec3 c) {
+    Vec3 ab = b - a;
+    Vec3 ac = c - a;
+    Vec3 norm = glm::normalize(glm::cross(ab, ac));
+    bool found = ScanPlane(out, origin, dir, a, ab, norm, ac, true);
+    if (!found) return false;
+    if (out.TexCoord.x < ZERO) return false;
+    if (out.TexCoord.y < ZERO) return false;
+    if (out.TexCoord.x + out.TexCoord.y > ONE) return false;
+    return true;
 }
 
 ////////////////////////////////////////////////////////////////
 
 void HitSelect(HitFull &lhsHit, const HitFull &rhsHit) noexcept {
     if (!rhsHit.Found) return;
-    if (!lhsHit.Found || rhsHit.Point.Distance < lhsHit.Point.Distance) {
-        lhsHit = rhsHit;
-    }
+    if (!lhsHit.Found || rhsHit.Point.Distance < lhsHit.Point.Distance) { lhsHit = rhsHit; }
 }
 
 void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
-    /*
-    for (int i = -2; i < 2; ++i) {
-        for (int j = 0; j < 4; ++j) {
-            for (int k = -2; k < 2; ++k) {
-                Vec3 pos = Real(3.) * (Vec3(i, j, k) + HALF);
-                HitFull hit;
-                hit.Found = ScanSphere(hit.Point, origin, dir, pos, ONE);
-                hit.Material.BaseColor = Vec3(.25);
-                hit.Material.Reflectivity = .75;
-                HitSelect(bestHit, hit);
-            }
-        }
+    for (auto &sphere : SPHERES) {
+        HitFull hit;
+        hit.Found = ScanSphere(hit.Point, origin, dir, sphere.Center, sphere.Radius);
+        hit.Material = sphere.Material;
+        HitSelect(bestHit, hit);
     }
-    */
-
-    HitFull hitSphere;
-    hitSphere.Found
-        = ScanSphere(hitSphere.Point, origin, dir, {0., 1., 0.}, 1.);
-    hitSphere.Material.BaseColor = Vec3(.25);
-    hitSphere.Material.Emission = {};
-    hitSphere.Material.ProbReflect = 0.;
-    HitSelect(bestHit, hitSphere);
 
     HitFull hitFloor;
-    hitFloor.Found = ScanPlane(hitFloor.Point, origin, dir, {}, {1., 0., 0.},
-                               {0., 1., 0.}, {0., 0., 1.});
+    hitFloor.Found = ScanPlane(hitFloor.Point, origin, dir, {}, {1., 0., 0.}, {0., 1., 0.}, {0., 0., 1.});
     if (hitFloor.Found) {
         Vec2i ij = glm::floor(hitFloor.Point.TexCoord);
         if ((ij.x + ij.y) % 2 == 0) {
@@ -203,11 +223,17 @@ void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
 
 Vec3 Sky(Vec3 dir) noexcept {
     constexpr Vec3 SKY_COLORS[] = {
-        Vec3(.05, .05, .25), Vec3(.75, .25, .5), Vec3(.9, .9, .6),
-        Vec3(1., 1., .99),   Vec3(5., 5., 3.),
+        Vec3(.05, .05, .25),
+        Vec3(.75, .25, .5),
+        Vec3(.9, .9, .6),
+        Vec3(1., 1., .99),
+        Vec3(5., 5., 3.),
     };
     constexpr Real SKY_BORDER[] = {
-        -1., 0., .9, .99,
+        -1.,
+        0.,
+        .9,
+        .99,
         2., // > 1 на случай, если косинус строго равен 1
     };
     constexpr size_t COLOR_COUNT = sizeof(SKY_COLORS) / sizeof(SKY_COLORS[0]);
@@ -250,8 +276,7 @@ Vec3 CastRay(RNG &rng, Vec3 origin, Vec3 dir) noexcept {
         } else {
             // Проверим, освещены ли мы солнцем
             HitFull hitSun = {};
-            Vec3 fuzzySunDir
-                = glm::normalize(SUN_DIR + FUZZINESS * RandomNormal3(rng));
+            Vec3 fuzzySunDir = glm::normalize(SUN_DIR + FUZZINESS * RandomNormal3(rng));
             ScanScene(hitSun, origin, fuzzySunDir);
             if (!hitSun.Found) {
                 // Ничто не загораживает солнце
@@ -270,20 +295,15 @@ Vec3 CastRay(RNG &rng, Vec3 origin, Vec3 dir) noexcept {
 
 ////////////////////////////////////////////////////////////////
 
-Vec3 picture[PIC_HEIGHT][PIC_WIDTH];
+Vec3 outPicture[PIC_HEIGHT][PIC_WIDTH];
 
 void GeneratePicture() noexcept {
     constexpr Real ASPECT_RATIO = Real(PIC_WIDTH) / Real(PIC_HEIGHT);
     constexpr Real SAMPLE_WEIGHT = ONE / AA_SAMPLES;
 
-    // Если делать случайные числа thread local,
-    // то будет слишком заметен паттерн шума,
-    // т.к. он будет повторяться на соседних строках
-    // с небольшим сдвигом.
-    RNG rng;
-
 #pragma omp parallel for
     for (size_t row = 0; row < PIC_HEIGHT; ++row) {
+        RNG rng(row);
         std::uniform_real_distribution<Real> uniform;
 
         for (size_t col = 0; col < PIC_WIDTH; ++col) {
@@ -301,7 +321,7 @@ void GeneratePicture() noexcept {
                 viewDir = glm::normalize(viewDir);
                 result += SAMPLE_WEIGHT * CastRay(rng, CAM_ORIGIN, viewDir);
             }
-            picture[row][col] = result;
+            outPicture[row][col] = result;
         }
     }
 }
@@ -312,7 +332,7 @@ void WritePicture() {
     fout << "P3 " << PIC_WIDTH << ' ' << PIC_HEIGHT << ' ' << PIXEL_MAX << '\n';
     for (size_t row = 0; row < PIC_HEIGHT; ++row) {
         for (size_t col = 0; col < PIC_WIDTH; ++col) {
-            Vec3 pixel = picture[row][col];
+            Vec3 pixel = outPicture[row][col];
             pixel = glm::pow(pixel, GAMMA_INV_V);
             for (size_t chan = 0; chan < 3; ++chan) {
                 int asInt = int(pixel[chan] * (PIXEL_MAX + 1));
