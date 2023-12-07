@@ -1,10 +1,18 @@
+#include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <fstream>
+#include <iostream>
 #include <random>
+#include <string_view>
+#include <tuple>
+#include <vector>
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 
 ////////////////////////////////////////////////////////////////
 
@@ -25,15 +33,15 @@ constexpr Real HALF = Real(.5);
 
 ////////////////////////////////////////////////////////////////
 
-constexpr size_t PIC_WIDTH = 1280;
-constexpr size_t PIC_HEIGHT = 720;
+constexpr size_t PIC_WIDTH = 640;
+constexpr size_t PIC_HEIGHT = 480;
 constexpr int PIXEL_MAX = 255;
 
 constexpr int MAX_BOUNCES = 8;
-constexpr int AA_SAMPLES = 8;
+constexpr int AA_SAMPLES = 4;
 
 const Vec3 CAM_ORIGIN = {0., 1., 5.};
-const Vec3 CAM_LOOK_AT = {0., 2., 0.};
+const Vec3 CAM_LOOK_AT = {0., 1., 0.};
 const Vec3 WORLD_UP = {0., 1., 0.};
 
 const Vec3 SUN_DIR = glm::normalize(Vec3(.5, .1, -1.));
@@ -80,6 +88,18 @@ struct Sphere {
 constexpr Sphere SPHERES[] = {
     {{0., 1., 0.}, 1., {Vec3(.25), {}, 0.}},
 };
+
+////////////////////////////////////////////////////////////////
+
+constexpr HitMaterial MODEL_MATERIAL = {Vec3(1., .75, .5), {}, 0.};
+
+struct Model {
+    std::vector<Vec3> Vertices;
+    std::vector<Vec2> TexCoords;
+    std::vector<std::tuple<Vec2i, Vec2i, Vec2i>> Faces;
+};
+
+Model model;
 
 ////////////////////////////////////////////////////////////////
 
@@ -180,8 +200,8 @@ bool ScanPlane(HitPoint &out,
 bool ScanTriangle(HitPoint &out, Vec3 origin, Vec3 dir, Vec3 a, Vec3 b, Vec3 c) {
     Vec3 ab = b - a;
     Vec3 ac = c - a;
-    Vec3 norm = glm::normalize(glm::cross(ab, ac));
-    bool found = ScanPlane(out, origin, dir, a, ab, norm, ac, true);
+    Vec3 norm = glm::normalize(glm::cross(ac, ab));
+    bool found = ScanPlane(out, origin, dir, a, ab, norm, ac);
     if (!found) return false;
     if (out.TexCoord.x < ZERO) return false;
     if (out.TexCoord.y < ZERO) return false;
@@ -201,8 +221,27 @@ void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
         HitFull hit;
         hit.Found = ScanSphere(hit.Point, origin, dir, sphere.Center, sphere.Radius);
         hit.Material = sphere.Material;
+        // HitSelect(bestHit, hit);
+    }
+
+    for (auto &face : model.Faces) {
+        break;
+        HitFull hit;
+        auto [ai, bi, ci] = face;
+        Vec3 a = model.Vertices[ai.x];
+        Vec3 b = model.Vertices[bi.x];
+        Vec3 c = model.Vertices[ci.x];
+        hit.Found = ScanTriangle(hit.Point, origin, dir, a, b, c);
+        hit.Material = MODEL_MATERIAL;
         HitSelect(bestHit, hit);
     }
+
+    HitFull hit;
+    hit.Found = ScanTriangle(hit.Point, origin, dir, {0., 0., 0.}, {0., 1., 0.}, {1., 0., 0.});
+    hit.Material.BaseColor = {};
+    hit.Material.Emission = Vec3(hit.Point.TexCoord, 0.);
+    hit.Material.ProbReflect = 0.;
+    HitSelect(bestHit, hit);
 
     HitFull hitFloor;
     hitFloor.Found = ScanPlane(hitFloor.Point, origin, dir, {}, {1., 0., 0.}, {0., 1., 0.}, {0., 0., 1.});
@@ -251,9 +290,6 @@ Vec3 Sky(Vec3 dir) noexcept {
         }
     }
     return SKY_COLORS[COLOR_COUNT - 1];
-
-    // Real progress = HALF * (dir.y + ONE);
-    // return glm::mix(Vec3(1., 1., 1.), Vec3(.5, .7, 1.), progress);
 }
 
 Vec3 CastRay(RNG &rng, Vec3 origin, Vec3 dir) noexcept {
@@ -295,11 +331,56 @@ Vec3 CastRay(RNG &rng, Vec3 origin, Vec3 dir) noexcept {
 
 ////////////////////////////////////////////////////////////////
 
+void ReadModel() {
+    model.Vertices.clear();
+    model.TexCoords.clear();
+    model.Faces.clear();
+
+    // Плюсовые стримы не настолько удобны,
+    // если разделитель не пробел.
+    // Как-нибудь переживём отсутствие RAII в одном месте.
+    FILE *f = fopen("model.obj", "r");
+    while (!feof(f)) {
+        char type[4];
+        if (fscanf(f, "%3s", type) != 1) break;
+        if (std::string_view(type) == "v") {
+            glm::vec3 vertex;
+            if (fscanf(f, "%f %f %f", &vertex.x, &vertex.y, &vertex.y) != 3) break;
+            model.Vertices.push_back(vertex);
+        } else if (std::string_view(type) == "vt") {
+            glm::vec2 textureCoord;
+            if (fscanf(f, "%f %f", &textureCoord.x, &textureCoord.y) != 2) break;
+            model.TexCoords.push_back(textureCoord);
+        } else if (std::string_view(type) == "f") {
+            std::tuple<Vec2i, Vec2i, Vec2i> face;
+            if (fscanf(f,
+                       "%d/%d %d/%d %d/%d",
+                       &std::get<0>(face).x,
+                       &std::get<0>(face).y,
+                       &std::get<1>(face).x,
+                       &std::get<1>(face).y,
+                       &std::get<2>(face).x,
+                       &std::get<2>(face).y)
+                != 6)
+                break;
+            model.Faces.push_back(face);
+        }
+    }
+    fclose(f);
+
+    std::cout << "Read model with:\n- " << model.Vertices.size() << " vertices\n- " << model.TexCoords.size()
+              << " texture coords\n- " << model.Faces.size() << " faces\n";
+}
+
+////////////////////////////////////////////////////////////////
+
 Vec3 outPicture[PIC_HEIGHT][PIC_WIDTH];
 
 void GeneratePicture() noexcept {
     constexpr Real ASPECT_RATIO = Real(PIC_WIDTH) / Real(PIC_HEIGHT);
     constexpr Real SAMPLE_WEIGHT = ONE / AA_SAMPLES;
+
+    std::atomic<size_t> rowsCompleted = 0;
 
 #pragma omp parallel for
     for (size_t row = 0; row < PIC_HEIGHT; ++row) {
@@ -323,6 +404,8 @@ void GeneratePicture() noexcept {
             }
             outPicture[row][col] = result;
         }
+        size_t completed = rowsCompleted.fetch_add(1);
+        if (++completed % 10 == 0) { std::cout << completed << " rows completed\n"; }
     }
 }
 
@@ -345,6 +428,7 @@ void WritePicture() {
 }
 
 int main() {
+    ReadModel();
     GeneratePicture();
     WritePicture();
 }
