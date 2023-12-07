@@ -34,6 +34,8 @@ const Vec3 CAM_ORIGIN = {0., 1., 5.};
 const Vec3 CAM_LOOK_AT = {0., 2., 0.};
 const Vec3 WORLD_UP = {0., 1., 0.};
 
+constexpr Real GAMMA = 2.;
+
 ////////////////////////////////////////////////////////////////
 
 const Vec3 CAM_FORWARD = glm::normalize(CAM_LOOK_AT - CAM_ORIGIN);
@@ -234,12 +236,15 @@ void GeneratePicture() noexcept {
 }
 
 void WritePicture() {
+    constexpr Vec3 GAMMA_INV_V = Vec3(1. / GAMMA);
     std::ofstream fout("out.ppm");
     fout << "P3 " << PIC_WIDTH << ' ' << PIC_HEIGHT << ' ' << PIXEL_MAX << '\n';
     for (size_t row = 0; row < PIC_HEIGHT; ++row) {
         for (size_t col = 0; col < PIC_WIDTH; ++col) {
+            Vec3 pixel = picture[row][col];
+            pixel = glm::pow(pixel, GAMMA_INV_V);
             for (size_t chan = 0; chan < 3; ++chan) {
-                int asInt = int(picture[row][col][chan] * (PIXEL_MAX + 1));
+                int asInt = int(pixel[chan] * (PIXEL_MAX + 1));
                 asInt = std::min(std::max(asInt, 0), PIXEL_MAX);
                 fout << asInt << ' ';
             }
