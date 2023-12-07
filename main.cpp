@@ -40,7 +40,7 @@ constexpr int PIXEL_MAX = 255;
 constexpr int MAX_BOUNCES = 32;
 constexpr int AA_SAMPLES = 32;
 
-const Vec3 CAM_ORIGIN = {-2., 3., 3.};
+const Vec3 CAM_ORIGIN = {-1., 3., 3.};
 const Vec3 CAM_LOOK_AT = {0., 1., 0.};
 const Vec3 WORLD_UP = {0., 1., 0.};
 
@@ -87,7 +87,7 @@ struct Sphere {
 };
 
 constexpr Sphere SPHERES[] = {
-    {{0., 1., 0.}, 1., {Vec3(.25), {}, 0.}},
+    {{2., 1., 2.}, 1., {Vec3(.25), {}, 0.}},
 };
 
 ////////////////////////////////////////////////////////////////
@@ -240,7 +240,7 @@ void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
         HitFull hit;
         hit.Found = ScanSphere(hit.Point, origin, dir, sphere.Center, sphere.Radius);
         hit.Material = sphere.Material;
-        // HitSelect(bestHit, hit);
+        HitSelect(bestHit, hit);
     }
 
     for (auto &face : model.Faces) {
