@@ -49,6 +49,7 @@ const Vec3 SUNLIGHT_COLOR = {2.5, 2., 1.5};
 constexpr Real FUZZINESS = .005;
 
 constexpr Real GAMMA = 2.;
+constexpr Real EPSILON = 1e-4;
 
 ////////////////////////////////////////////////////////////////
 
@@ -179,10 +180,23 @@ bool ScanPlaneO(
     out.Normal = planeY;
 
     Vec3 ax = out.Position - oa;
-    out.TexCoord.x = glm::dot(ax, planeX);
-    out.TexCoord.y = glm::dot(ax, planeZ);
-
-    if (denormalized) { out.TexCoord /= Vec2(glm::dot(planeX, planeX), glm::dot(planeZ, planeZ)); }
+    if (denormalized) {
+        // TODO: nepravda, fix this
+        Real x2 = glm::dot(planeX, planeX);
+        Real z2 = glm::dot(planeZ, planeZ);
+        Real xz = glm::dot(planeX, planeZ);
+        Vec3 tauZ = xz / x2 * planeX;
+        Vec3 orthoZ = planeZ - tauZ;
+        out.TexCoord.y = glm::dot(ax, orthoZ) / glm::dot(orthoZ, orthoZ);
+        // ax = planeX * x + planeZ * y
+        // planeX * x = ax - planeZ * y
+        // planeX^2 * x = dot(ax - planeZ * y, planeX)
+        out.TexCoord.x = glm::dot(ax - planeZ * out.TexCoord.y, planeX) / x2;
+    } else {
+        out.TexCoord.x = glm::dot(ax, planeX);
+        out.TexCoord.y = glm::dot(ax, planeZ);
+        return true;
+    }
 
     return true;
 }
@@ -203,7 +217,9 @@ bool ScanPlane(HitPoint &out,
 bool ScanTriangle(HitPoint &out, Vec3 origin, Vec3 dir, Vec3 a, Vec3 b, Vec3 c) {
     Vec3 ab = b - a;
     Vec3 ac = c - a;
-    Vec3 norm = glm::normalize(glm::cross(ab, ac));
+    Vec3 norm = glm::cross(ab, ac);
+    if (glm::dot(norm, norm) < EPSILON) return false;
+    norm = glm::normalize(norm);
     bool found = ScanPlane(out, origin, dir, a, ab, norm, ac, true);
     if (!found) return false;
     if (out.TexCoord.x < ZERO) return false;
@@ -228,26 +244,18 @@ void ScanScene(HitFull &bestHit, Vec3 origin, Vec3 dir) noexcept {
     }
 
     for (auto &face : model.Faces) {
-        break;
         HitFull hit;
         auto [ai, bi, ci] = face;
-        Vec3 a = model.Vertices[ai.x];
-        Vec3 b = model.Vertices[bi.x];
-        Vec3 c = model.Vertices[ci.x];
+        Vec3 a = model.Vertices[ai.x - 1];
+        Vec3 b = model.Vertices[bi.x - 1];
+        Vec3 c = model.Vertices[ci.x - 1];
         hit.Found = ScanTriangle(hit.Point, origin, dir, a, b, c);
         hit.Material = MODEL_MATERIAL;
         HitSelect(bestHit, hit);
     }
 
-    HitFull hit;
-    hit.Found = ScanTriangle(hit.Point, origin, dir, {0., 0., 0.}, {1.5, 0., 0.}, {0., 1.5, 0.});
-    hit.Material.BaseColor = {};
-    hit.Material.Emission = Vec3(hit.Point.TexCoord, 0.);
-    hit.Material.ProbReflect = 0.;
-    HitSelect(bestHit, hit);
-
     HitFull hitFloor;
-    hitFloor.Found = ScanPlane(hitFloor.Point, origin, dir, {}, {1., 0., 0.}, {0., 1., 0.}, {0., 0., 1.});
+    hitFloor.Found = ScanPlane(hitFloor.Point, origin, dir, {0., -1., 0.}, {1., 0., 0.}, {0., 1., 0.}, {0., 0., 1.});
     if (hitFloor.Found) {
         Vec2i ij = glm::floor(hitFloor.Point.TexCoord);
         if ((ij.x + ij.y) % 2 == 0) {
@@ -348,7 +356,7 @@ void ReadModel() {
         if (fscanf(f, "%3s", type) != 1) break;
         if (std::string_view(type) == "v") {
             glm::vec3 vertex;
-            if (fscanf(f, "%f %f %f", &vertex.x, &vertex.y, &vertex.y) != 3) break;
+            if (fscanf(f, "%f %f %f", &vertex.x, &vertex.y, &vertex.z) != 3) break;
             model.Vertices.push_back(vertex);
         } else if (std::string_view(type) == "vt") {
             glm::vec2 textureCoord;
